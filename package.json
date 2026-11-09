@@ -1,0 +1,42 @@
+{
+  "name": "@kubohiroya/turbowarp-plus-editor-project-model",
+  "version": "0.1.0",
+  "description": "UI-free reads and edits of a running Scratch project for TurboWarp Plus Editor",
+  "type": "module",
+  "license": "MPL-2.0",
+  "author": "Hiroya Kubo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kubohiroya/turbowarp-plus-editor-project-model.git"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./project-messages": {
+      "types": "./dist/project-messages.d.ts",
+      "default": "./dist/project-messages.js"
+    },
+    "./sprite-variable-edit": {
+      "types": "./dist/sprite-variable-edit.d.ts",
+      "default": "./dist/sprite-variable-edit.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "tsconfig.json",
+    "README.md",
+    "README.ja.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}
