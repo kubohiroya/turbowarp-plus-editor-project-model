@@ -1,5 +1,8 @@
+type VariableType = '' | 'list';
+
 export type SpriteVariableEdit =
-    {type: 'create'; name: string; isCloud?: boolean} |
+    {type: 'create'; name: string; variableType?: ''; isCloud?: boolean} |
+    {type: 'create'; name: string; variableType: 'list'; isCloud?: false} |
     {type: 'rename'; id: string; name: string} |
     {type: 'delete'; id: string};
 
@@ -12,7 +15,7 @@ type Block = {
     inputs: Record<string, {block: string | null; shadow: string | null}>;
 };
 type VariableEvent =
-    {type: 'var_create'; varId: string; varName: string; varType: ''; isLocal: boolean; isCloud: boolean} |
+    {type: 'var_create'; varId: string; varName: string; varType: VariableType; isLocal: boolean; isCloud: boolean} |
     {type: 'var_rename'; varId: string; newName: string} |
     {type: 'var_delete'; varId: string};
 type VariableTarget = {
@@ -141,7 +144,8 @@ export function editSpriteVariable(vm: VariableProject, targetId: string, edit: 
         if (isUsed(target, runtime.targets, edit.id, variable!.name)) return 'inUse';
         target.blocks.blocklyListen({type: 'var_delete', varId: edit.id});
     } else {
-        const cloud = edit.type === 'create' ? edit.isCloud === true : variable?.isCloud === true;
+        const variableType = edit.type === 'create' ? edit.variableType ?? '' : '';
+        const cloud = edit.type === 'create' ? variableType === '' && edit.isCloud === true : variable?.isCloud === true;
         const name = (cloud && edit.name.startsWith(cloudVariablePrefix) ?
             edit.name.slice(cloudVariablePrefix.length) : edit.name).trim();
         if (!name) return 'emptyName';
@@ -149,14 +153,17 @@ export function editSpriteVariable(vm: VariableProject, targetId: string, edit: 
         if (fullName === variable?.name) return;
         const scope = target.isStage ? runtime.targets.filter(item => item.isStage || item.isOriginal) :
             [target, runtime.getTargetForStage()];
-        if (scope.some(owner => owner && Object.values(owner.variables).some(item => item.type === '' && item.name === fullName))) {
+        if (scope.some(owner => owner && Object.values(owner.variables).some(item =>
+            item.type === variableType && item.name === fullName))) {
             return 'duplicateName';
         }
         if (edit.type === 'create') {
             if (cloud && !target.isStage) return 'unavailable';
             if (cloud && !runtime.canAddCloudVariable?.()) return 'cloudLimit';
             const varId = Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('');
-            target.blocks.blocklyListen({type: 'var_create', varId, varName: fullName, varType: '', isLocal: !target.isStage, isCloud: cloud});
+            target.blocks.blocklyListen({
+                type: 'var_create', varId, varName: fullName, varType: variableType, isLocal: !target.isStage, isCloud: cloud
+            });
         } else {
             target.blocks.blocklyListen({type: 'var_rename', varId: edit.id, newName: fullName});
         }
