@@ -66,6 +66,22 @@ test('keeps the cloud prefix when renaming a cloud variable', () => {
     assert.deepEqual(stage.events, [{type: 'var_rename', varId: 'c', newName: `${cloudVariablePrefix}best`}]);
 });
 
+test('creates cloud variables through the stage event only while capacity is available', () => {
+    const stage = makeTarget('stage', {isStage: true});
+    const {vm, refreshed} = makeProject(stage);
+    const edit = {type: 'create', name: ' スコア ', isCloud: true} as const;
+    assert.equal(editSpriteVariable(vm, 'stage', edit), 'cloudLimit');
+    assert.equal(refreshed(), 0);
+    assert.equal(stage.events.length, 0);
+    const available = {...vm, runtime: {...vm.runtime, canAddCloudVariable: () => true}};
+    assert.equal(editSpriteVariable(available, 'stage', edit), undefined);
+    assert.deepEqual({...stage.events[0] as object, varId: 'id'},
+        {type: 'var_create', varId: 'id', varName: '☁ スコア', varType: '', isLocal: false, isCloud: true});
+    assert.equal(refreshed(), 1);
+    const sprite = makeTarget('sprite');
+    assert.equal(editSpriteVariable(makeProject(sprite, [stage]).vm, 'sprite', edit), 'unavailable');
+});
+
 test('refuses to delete a variable that a block or a sensing_of block uses', () => {
     const used = makeTarget('sprite', {name: 'Cat', variables: {v: {name: 'speed', type: ''}}, references: {v: []}});
     assert.equal(editSpriteVariable(makeProject(used).vm, 'sprite', {type: 'delete', id: 'v'}), 'inUse');

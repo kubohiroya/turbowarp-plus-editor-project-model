@@ -1,6 +1,6 @@
 {
   "name": "@kubohiroya/turbowarp-plus-editor-project-model",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "UI-free reads and edits of a running Scratch project for TurboWarp Plus Editor",
   "type": "module",
   "license": "MPL-2.0",
