@@ -1,6 +1,8 @@
 // The judgement for broadcast blocks lives in project-messages, which the layout's message
 // section also uses, so the section and this search agree.
 import {messageReference} from './project-messages.ts';
+import {literalSearchMatches} from './literal-search.ts';
+export {literalSearchPattern} from './literal-search.ts';
 
 type Field = {id?: string; value: unknown};
 type Block = {
@@ -59,8 +61,6 @@ export type YamlSearchResult = {
     range: {start: number; end: number; expectedText: string};
 };
 export type SearchResult = ProjectSearchResult | YamlSearchResult;
-export const literalSearchPattern = (query: string, flags: string) =>
-    new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
 
 const headings: Record<Exclude<SearchKind, 'yaml'>, [string, string]> = {
     block: ['ブロック', 'Blocks'],
@@ -159,7 +159,7 @@ export function searchProject(project: SearchProject, messages: Record<string, s
     const groups = new Map(Object.entries(headings).map(([kind, titles]) => [
         kind as SearchKind, {kind: kind as SearchKind, title: titles[japanese ? 0 : 1], results: [] as ProjectSearchResult[]}
     ]));
-    const search = query.trim().toLocaleLowerCase();
+    const search = query.trim().normalize('NFC').toLocaleLowerCase();
     if (!search && !variableSearch) return [];
 
     const stage = project.targets.find(target => target.isStage);
@@ -167,7 +167,7 @@ export function searchProject(project: SearchProject, messages: Record<string, s
     const searchBlocks = variableSearch || (['block', 'variable', 'list', 'message', 'argument', 'extension'] as const)
         .some(kind => kinds.has(kind));
     const templates = new Map<string, {text: string; extension?: string}>();
-    const matches = (value: string) => value.toLocaleLowerCase().includes(search);
+    const matches = (value: string) => value.normalize('NFC').toLocaleLowerCase().includes(search);
     const describeOpcode = (opcode: string) => {
         const cached = templates.get(opcode);
         if (cached) return cached;
@@ -290,7 +290,6 @@ export function searchYamlDocuments(documents: readonly YamlSearchDocument[], qu
     const results: YamlSearchResult[] = [];
     const search = query.trim();
     if (!search) return results;
-    const pattern = literalSearchPattern(search, 'giu');
     const seen = new Set<string>();
     const duplicates = new Set<string>();
     for (const {filename} of documents) {
@@ -301,9 +300,8 @@ export function searchYamlDocuments(documents: readonly YamlSearchDocument[], qu
         let line = 1;
         let lineStart = 0;
         let newline = document.source.indexOf('\n');
-        for (const match of document.source.matchAll(pattern)) {
-            const start = match.index;
-            const end = start + match[0].length;
+        for (const range of literalSearchMatches(document.source, search)) {
+            const {start, end} = range;
             while (newline >= 0 && newline < start) {
                 line++;
                 lineStart = newline + 1;
@@ -320,7 +318,7 @@ export function searchYamlDocuments(documents: readonly YamlSearchDocument[], qu
             results.push({
                 kind: 'yaml', document, label: `${before > lineStart ? '…' : ''}${document.source.slice(before, after)}${after < lineEnd ? '…' : ''}`,
                 detail: [position, identity].filter(Boolean).join(' · '),
-                range: {start, end, expectedText: match[0]}
+                range
             });
         }
     }

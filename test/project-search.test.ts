@@ -112,6 +112,126 @@ test('YAML results preserve document identity and UTF-16 offsets for each litera
     }
 });
 
+test('project search treats composed and decomposed kana alike without changing stored text', () => {
+    for (const sourceForm of ['NFC', 'NFD'] as const) {
+        const name = '星を並べる'.normalize(sourceForm);
+        const sprite = target('sprite', ['call', 'use', 'say'], [
+            {id: 'call', opcode: 'procedures_call', mutation: {proccode: name}},
+            {id: 'use', opcode: 'data_showvariable', fields: {VARIABLE: {id: 'name', value: name}}},
+            {id: 'say', opcode: 'looks_say', inputs: {MESSAGE: {block: 'text'}}},
+            {id: 'text', opcode: 'text', shadow: true, fields: {TEXT: {value: name}}}
+        ], {variables: {name: {name}}, comments: {note: {text: name}},
+            getCostumes: () => [{name}], getSounds: () => [{name}]});
+        const project = {targets: [sprite]};
+        const before = JSON.stringify(project);
+        for (const queryForm of ['NFC', 'NFD'] as const) {
+            for (const query of ['星を並', '星を並べ', '星を並べる', 'べ']) {
+                const groups = searchProject(project, {}, query.normalize(queryForm), true);
+                assert.deepEqual(groups.map(group => group.kind),
+                    ['block', 'variable', 'argument', 'comment', 'costume', 'sound']);
+                assert.ok(groups.every(group => group.results.every(result => result.label === name)));
+            }
+        }
+        assert.equal(JSON.stringify(project), before);
+    }
+});
+
+test('search keeps voiced, semi-voiced and unvoiced kana distinct in either form', () => {
+    for (const kana of ['べ', 'ぺ', 'が', 'ぱ', 'ヴ', 'パ']) {
+        for (const sourceForm of ['NFC', 'NFD'] as const) {
+            const source = kana.normalize(sourceForm);
+            const project = {targets: [target('sprite', [], [], {comments: {note: {text: source}}})]};
+            const documents = [{reference: {providerId: 'provider', documentId: 'kana'}, filename: 'kana.yaml', source}];
+            for (const queryForm of ['NFC', 'NFD'] as const) {
+                const query = kana.normalize(queryForm);
+                assert.equal(searchProject(project, {}, query, true)[0]?.results.length, 1);
+                assert.equal(searchYamlDocuments(documents, query, true).length, 1);
+            }
+            for (const query of ['へ', 'べ', 'ぺ', 'か', 'が', 'は', 'ぱ', 'ウ', 'ヴ', 'ハ', 'パ'].filter(query => query !== kana)) {
+                assert.deepEqual(searchProject(project, {}, query, true), []);
+                assert.deepEqual(searchYamlDocuments(documents, query, true), []);
+            }
+        }
+    }
+});
+
+test('normalized YAML matches retain original UTF-16 ranges across mixed forms and lines', () => {
+    const composed = '星を並べる';
+    const decomposed = composed.normalize('NFD');
+    const prefix = '前: が'.normalize('NFD') + ' 📚';
+    const source = `${prefix}${decomposed}. ${composed}.\n次: 📚${decomposed}.`;
+    const document = {reference: {providerId: 'provider', documentId: 'mixed'}, filename: 'mixed.yaml', source};
+    const starts = [prefix.length, prefix.length + decomposed.length + 2, source.lastIndexOf(decomposed)];
+    for (const query of [composed, decomposed]) {
+        const results = searchYamlDocuments([document], query, true);
+        assert.deepEqual(results.map(result => result.range), [decomposed, composed, decomposed].map((text, i) =>
+            ({start: starts[i], end: starts[i] + text.length, expectedText: text})));
+        assert.equal(results[2].detail, '2 行 6 列');
+        const replacements = [
+            `${prefix}$1. ${composed}.\n次: 📚${decomposed}.`,
+            `${prefix}${decomposed}. $1.\n次: 📚${decomposed}.`,
+            `${prefix}${decomposed}. ${composed}.\n次: 📚$1.`
+        ];
+        for (const [i, result] of results.entries()) {
+            assert.equal(result.document, document);
+            const {start, end, expectedText} = result.range;
+            assert.equal(source.slice(start, end), expectedText);
+            assert.equal(replacementText(result, query, '$1'), '$1');
+            assert.equal(source.slice(0, start) + '$1' + source.slice(end), replacements[i]);
+        }
+    }
+    const marks = searchYamlDocuments([document], 'べ', true);
+    assert.deepEqual(marks.map(result => result.range.expectedText), ['へ\u3099', 'べ', 'へ\u3099']);
+    assert.equal(document.source, source);
+});
+
+test('normalized literal search preserves case folding, regex punctuation and compatibility distinctions', () => {
+    const source = 'が'.normalize('NFD') + ' 📚Be.*[x] BE.*[x] ＢＥ.*[x]';
+    const document = {reference: {providerId: 'provider', documentId: 'literal'}, filename: 'literal.yaml', source};
+    const results = searchYamlDocuments([document], ' be.*[x] ', false);
+    assert.deepEqual(results.map(result => result.range), [
+        {start: 5, end: 12, expectedText: 'Be.*[x]'},
+        {start: 13, end: 20, expectedText: 'BE.*[x]'}
+    ]);
+    assert.deepEqual(searchYamlDocuments([document], 'Be.*(x)', false), []);
+    assert.deepEqual(searchYamlDocuments([document], '  ', false), []);
+});
+
+test('normalization maps changed graphemes with stable internal boundaries back to the source', () => {
+    const source = 'a\u0301\u0338 📚각 각 각';
+    const document = {reference: {providerId: 'provider', documentId: 'combining'}, filename: 'combining.yaml', source};
+    const accented = searchYamlDocuments([document], 'á', false);
+    assert.deepEqual(accented.map(result => result.range), [{start: 0, end: 2, expectedText: 'a\u0301'}]);
+    assert.deepEqual(searchYamlDocuments([document], '각', false).map(result => result.range), [
+        {start: 6, end: 9, expectedText: '각'},
+        {start: 10, end: 12, expectedText: '각'},
+        {start: 13, end: 14, expectedText: '각'}
+    ]);
+    // A reordered match must not replace an intervening mark it did not match.
+    assert.deepEqual(searchYamlDocuments([{...document, source: 'a\u0301\u0323'}], 'ạ', false), []);
+});
+
+test('normalized replacements splice original text and preserve procedure placeholders', () => {
+    for (const sourceForm of ['NFC', 'NFD'] as const) {
+        const name = '📚星を並べる'.normalize(sourceForm);
+        const sprite = target('sprite', ['call', 'use', 'text'], [
+            {id: 'call', opcode: 'procedures_call', mutation: {proccode: `${name} %s %b %n`}},
+            {id: 'use', opcode: 'data_showvariable', fields: {VARIABLE: {id: 'name', value: name}}},
+            {id: 'text', opcode: 'argument_reporter_string_number', fields: {VALUE: {value: name}}}
+        ], {variables: {name: {name}}, comments: {note: {text: name}}});
+        for (const query of ['べ', 'へ\u3099']) {
+            const results = searchProject({targets: [sprite]}, {}, query, true).flatMap(group => group.results);
+            assert.equal(results.length, 4);
+            for (const result of results) {
+                const suffix = result.edit?.type === 'procedure' ? ' %s %b %n' : '';
+                assert.equal(replacementText(result, query, '$1ぺ'), `📚星を並$1ぺる${suffix}`);
+                assert.equal(replacementText(result, query, 'べ'.normalize(sourceForm)), undefined);
+                if (suffix) assert.equal(replacementText(result, query, '%s'), undefined);
+            }
+        }
+    }
+});
+
 test('replacement splices a literal match and rejects a renamed or conflicting variable', () => {
     const field = {id: 'score', value: 'old.score'};
     const stage = target('stage', ['use'], [{id: 'use', opcode: 'data_showvariable', fields: {VARIABLE: field}}],

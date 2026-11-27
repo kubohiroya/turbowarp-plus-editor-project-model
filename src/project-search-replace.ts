@@ -1,4 +1,5 @@
-import {literalSearchPattern, type ProjectSearchResult, type SearchProject, type SearchResult} from './project-search.ts';
+import type {ProjectSearchResult, SearchProject, SearchResult} from './project-search.ts';
+import {literalSearchMatches} from './literal-search.ts';
 
 type Field = {
     getValue(): unknown;
@@ -34,16 +35,16 @@ export type ReplaceBlockly = {
 };
 export type ReplaceOutcome = 'applied' | 'staged' | 'stale' | 'conflict' | 'invalid' | 'read-only';
 
-function spliceMatch(value: string, pattern: RegExp, replacement: string) {
-    const match = pattern.exec(value);
-    if (match) return value.slice(0, match.index) + replacement + value.slice(match.index + match[0].length);
+function spliceMatch(value: string, query: string, replacement: string) {
+    const match = literalSearchMatches(value, query).next().value;
+    if (match) return value.slice(0, match.start) + replacement + value.slice(match.end);
 }
 
-function replaceProcedureLabel(name: string, pattern: RegExp, replacement: string) {
+function replaceProcedureLabel(name: string, query: string, replacement: string) {
     if (/%[sbn]/.test(replacement)) return;
     const parts = name.split(/(%[sbn])/);
     for (let i = 0; i < parts.length; i += 2) {
-        const changed = spliceMatch(parts[i], pattern, replacement);
+        const changed = spliceMatch(parts[i], query, replacement);
         if (changed === undefined) continue;
         parts[i] = changed;
         const next = parts.join('');
@@ -57,10 +58,9 @@ export function replacementText(result: SearchResult, query: string, replacement
     if (result.kind === 'yaml') return replacement !== result.range.expectedText ? replacement : undefined;
     const edit = result.edit;
     if (!edit) return;
-    const pattern = literalSearchPattern(query, 'iu');
     const source = edit.type === 'name' || edit.type === 'procedure' ? edit.name : edit.type === 'comment' ? edit.text : edit.value;
-    const next = edit.type === 'procedure' ? replaceProcedureLabel(source, pattern, replacement) :
-        spliceMatch(source, pattern, replacement);
+    const next = edit.type === 'procedure' ? replaceProcedureLabel(source, query, replacement) :
+        spliceMatch(source, query, replacement);
     return next !== source ? next : undefined;
 }
 
